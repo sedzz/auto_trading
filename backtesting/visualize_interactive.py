@@ -40,9 +40,14 @@ bt = Backtest(
 
 stats = bt.run()
 
-# Guardar y abrir
-output_path = os.path.abspath(f'backtesting/exports/btc_interactive_chart_{datetime.datetime.now()}.html')
+# Asegurar que existe el directorio de exports
+exports_dir = os.path.join(os.path.dirname(__file__), 'exports')
+os.makedirs(exports_dir, exist_ok=True)
+
+# Guardar y abrir (formatear fecha sin caracteres inválidos en Windows)
+timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+output_path = os.path.join(exports_dir, f'btc_interactive_chart_{timestamp}.html')
 bt.plot(filename=output_path, open_browser=False)
 
 print(f"✅ Gráfico guardado: {output_path}")
-webbrowser.open(f'file://{output_path}')
+# webbrowser.open(f'file://{output_path}')
