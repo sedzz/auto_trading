@@ -50,26 +50,23 @@ def obtener_feature_cols(df: pd.DataFrame) -> list[str]:
 # Split temporal
 # =============================================================================
 
-def split_temporal(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def split_temporal(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Divide el dataset en 3 periodos:
-      - Train:      2017 – 2022  (aprender patrones)
-      - Validation:  2022 – 2024  (ajustar hiperparámetros)
-      - Test:        2024 – 2026  (evaluación final, no tocar)
+    Divide el dataset en 2 periodos:
+      - Train:  2017 – 2025  (aprender patrones con todo el histórico)
+      - Test:   2025 – 2026  (predicción real, datos nunca vistos)
     """
     df = df.copy()
     dt = pd.to_datetime(df["open_time"])
 
-    train = df[dt < "2022-01-01"].copy()
-    val = df[(dt >= "2022-01-01") & (dt < "2024-01-01")].copy()
-    test = df[dt >= "2024-01-01"].copy()
+    train = df[dt < "2025-01-01"].copy()
+    test = df[dt >= "2025-01-01"].copy()
 
     print(f"Split temporal:")
-    print(f"  Train:      {len(train):>6} filas  (2017–2022)")
-    print(f"  Validation: {len(val):>6} filas  (2022–2024)")
-    print(f"  Test:       {len(test):>6} filas  (2024–2026)")
+    print(f"  Train: {len(train):>6} filas  (2017–2025)")
+    print(f"  Test:  {len(test):>6} filas  (2025–2026)")
 
-    return train, val, test
+    return train, test
 
 
 # =============================================================================
@@ -78,20 +75,28 @@ def split_temporal(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Dat
 
 def entrenar_modelo(
     train: pd.DataFrame,
-    val: pd.DataFrame,
     feature_cols: list[str],
     params: dict | None = None,
+    val_frac: float = 0.1,
 ) -> lgb.Booster:
     """
     Entrena un clasificador LightGBM multiclase (LONG / HOLD / SHORT).
+    Usa el último val_frac del train como validation interna para early stopping.
     """
     # Mapear labels: -1 → 0, 0 → 1, 1 → 2
     label_map = {-1: 0, 0: 1, 1: 2}
 
-    X_train = train[feature_cols]
-    y_train = train["label"].map(label_map)
-    X_val = val[feature_cols]
-    y_val = val["label"].map(label_map)
+    # Split interno: último 10% del train como validation para early stopping
+    split_idx = int(len(train) * (1 - val_frac))
+    train_inner = train.iloc[:split_idx]
+    val_inner = train.iloc[split_idx:]
+
+    X_train = train_inner[feature_cols]
+    y_train = train_inner["label"].map(label_map)
+    X_val = val_inner[feature_cols]
+    y_val = val_inner["label"].map(label_map)
+
+    print(f"  Train interno: {len(train_inner)} filas, Val interno: {len(val_inner)} filas")
 
     # Pesos para balancear clases desiguales
     class_counts = y_train.value_counts().sort_index()
@@ -359,22 +364,22 @@ def run():
 
     # 3. Split
     print("\n3. Split temporal...")
-    train, val, test = split_temporal(df)
+    train, test = split_temporal(df)
 
     # 4. Features a usar
     feature_cols = obtener_feature_cols(df)
     print(f"\nFeatures ({len(feature_cols)}): {feature_cols}")
 
-    # 5. Entrenar
-    model = entrenar_modelo(train, val, feature_cols)
+    # 5. Entrenar (usa último 10% del train como val interna para early stopping)
+    model = entrenar_modelo(train, feature_cols)
 
-    # 6. Evaluar (sin filtro)
-    evaluar_modelo(model, val, feature_cols, nombre="Validation (2022–2024)")
-    evaluar_modelo(model, test, feature_cols, nombre="Test (2024–2026)")
+    # 6. Evaluar
+    evaluar_modelo(model, train, feature_cols, nombre="Train (2017–2025)")
+    evaluar_modelo(model, test, feature_cols, nombre="Test (2025–2026)")
 
     # 7. Análisis de umbrales de confianza
-    analizar_umbrales(model, val, feature_cols, nombre="Validation (2022–2024)")
-    analizar_umbrales(model, test, feature_cols, nombre="Test (2024–2026)")
+    analizar_umbrales(model, train, feature_cols, nombre="Train (2017–2025)")
+    analizar_umbrales(model, test, feature_cols, nombre="Test (2025–2026)")
 
     # 8. Feature importance
     importance = mostrar_importancia(model)
